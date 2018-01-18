@@ -1,0 +1,7 @@
+Origin: package.cryptoguru.org
+Label: package.cryptoguru.org
+Codename: jessie
+Architectures: amd64
+Components: main
+Description: CryptoGuru Package Repository
+SignWith: C2AC0FF46676DB0C

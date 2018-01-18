@@ -1,2 +1,7 @@
 # Utilities
-Various Utilities and Prototypes
+
+Various Utilities, Tidbits and Prototypes
+
+## package
+
+Files behind http://package.cryptoguru.org

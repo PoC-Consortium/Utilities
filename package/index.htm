@@ -1,0 +1,43 @@
+<!--# include file="include/header.htm" -->
+      <div class="tab-content">
+	<div id="debian" class="tab-pane fade in active">
+	  <h2 class="pull-left">Debian</h2>
+	  <img src="asset/openlogo-nd-25.png" class="pull-right" style="width: 50px; margin: 10px;" alt="Debian GNU Linux" />
+	  <div class="clearfix"></div>
+	  <h3>Available Packages</h3>
+	  <ul>
+            <li><a href="https://github.com/ac0v/burstcoin">burstcoincg - Burstcoin wallet powered by CryptoGuru based on MariaDB.</a></li>
+            <li><a href="https://github.com/Creepsky/creepMiner">creepminer - The creepMiner is a client application for mining Burst on a pool or solo.</a></li>
+	  </ul>
+	  <h3>Install, quickly</h3>
+	  Copy & Paste this line into your terminal:
+	  <pre>\wget -q -O - http://package.cryptoguru.org/debian/init.sh | bash</pre>
+	  and now you can install packages like:
+	  <pre>apt-get install burstcoincg</pre>
+          <h3>Install, for the Suspicious</h3>
+	  The Quick- Install downloads a shell script and executes it directly. If you're really concerned about the argument that it may contain nefarious activities within, you can easily review it before you run it.
+          <pre>wget http://package.cryptoguru.org/debian/init.sh
+less install.sh
+bash install.sh</pre>
+	  and now you can install packages like:
+          <pre>apt-get install burstcoincg</pre>
+	  <h3>Install, for Advanced users</h3>
+	  <ul>
+            <li>
+              <h4>stretch</h4>
+              Add the following stuff to your sources.list
+              <pre>deb https://package.cryptoguru.org/debian/stretch stretch main</pre>
+              sometimes you will need to play with package pining
+            </li>
+            <li>
+              <h4>jessie</h4>
+              Add the following stuff to your sources.list
+              <pre>deb https://package.cryptoguru.org/debian/jessie jessie main</pre>
+              sometimes you will need to play with package pining and you may have to add
+              <pre>deb http://ftp.debian.org/debian jessie-backports main</pre>
+            </li>
+	  </ul>
+ 	  <h3>Found an Issue?</h3>
+	  Please report all bugs at <a href="https://github.com/PoC-Consortium/burstcoin/issues">GitHub</a>. You can also <a href="https://discord.gg/NKXGM6N">discuss your problems and get support using Discord</a>
+	</div>
+<!--# include file="include/footer.htm" -->
