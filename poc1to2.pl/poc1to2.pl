@@ -59,6 +59,15 @@ open my $handle, '+<:raw', $tmp_plotpath or fail("Failed to open '$plotpath'");
 binmode $handle;
 
 print "processing scoops...\n";
+$|++;
+
+# We assume an optimized PoC1 file (scoop 0 of all nonces, then scoop 1 of all nonces etc...)
+# we read in scoop 0 and scoop 4095 for all nonces, then we swap their MSB 32 bytes
+# then we write these scoops back to disk
+# we continue with scoop 1 and scoop 4094
+# Therefore, each iteration handles 2 scoops, we need to make 2048 iterations for any plot file.
+# our memory requirements for the two buffers are <number of nonces> * 128 bytes
+# => roughly 1/2000th of the plot size (e.g. 5GB for a 10TB plot)
 
 for (my $scoop = 0; $scoop < $SCOOPS_IN_NONCE / 2; $scoop++) {
     $pos = $scoop * $block_size;
@@ -90,9 +99,6 @@ for (my $scoop = 0; $scoop < $SCOOPS_IN_NONCE / 2; $scoop++) {
 close $handle;
 
 rename $tmp_plotpath, $plotpath_poc2;
-
-
-
 
 # {{{ parse_plotname               examine given plotname if in optimized PoC1 format
 
@@ -152,7 +158,7 @@ sub print_help {
     $0 - PoC1 to PoC2 converter
 
  Usage:
-    LBC [options]
+    $0 [options]
 
  Options:
     --help
