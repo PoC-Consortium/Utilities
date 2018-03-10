@@ -74,8 +74,7 @@ for (my $scoop = 0; $scoop < $SCOOPS_IN_NONCE / 2; $scoop++) {
     # here perform the shuffle-conversion
     for (my $nonceidx = 0; $nonceidx < $numnonces; $nonceidx++) {
         my $hash1 = substr $buffer1, $off, $SHABAL256_HASH_SIZE;
-        my $hash2 = substr($buffer2, $off, $SHABAL256_HASH_SIZE);
-        substr($buffer1, $off, $SHABAL256_HASH_SIZE) = $hash2;
+        substr($buffer1, $off, $SHABAL256_HASH_SIZE) = substr($buffer2, $off, $SHABAL256_HASH_SIZE);
         substr($buffer2, $off, $SHABAL256_HASH_SIZE) = $hash1;
         $off += $SCOOP_SIZE;
     }
