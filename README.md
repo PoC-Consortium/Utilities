@@ -8,4 +8,4 @@ The files behind http://package.cryptoguru.org
 
 ## poc1to2.pl
 
-In-place PoC1->PoC2 converter written in Perl
+PoC1->PoC2 converter (in-place and copy-on-write) written in Perl

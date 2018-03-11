@@ -226,6 +226,17 @@ sub print_help {
  Options:
     --help
       This help
+
+    --out <directory>
+      Define a directory to write the converted plot file to. This switches
+      to copy on write mode. (Else in-place is default) and allows you to
+      fasten up the conversion at the expense of temporary additional HDD
+      space.
+
+    --quiet
+      Quiet operation. Really quiet - no output at all (except failures).
+      You can send the process into background and forget about it.
+
 EOH
 
     exit 0;
