@@ -14,16 +14,15 @@ use Getopt::Long;                                                # command line 
 # }}}
 # {{{ var block
 
-my $plotpath = $ARGV[0];
-my ($pname,$ppath,$psuffix) = fileparse($plotpath,());
+# CLI param defaults;
 
+my $quiet = 0;      # quiet = 0 => we are verbose
+my $outdir;         # undefined => plot file in-place modification
+my $inplace = 1;    # default mode of operation: convert in-place
 
-# define quantities
+# some plot constants
 
-my $SCOOPS_IN_NONCE = 4096;
-
-# define sizes within a plot file - in bytes
-
+my $SCOOPS_IN_NONCE     = 4096;
 my $SHABAL256_HASH_SIZE = 32;
 my $SCOOP_SIZE          = $SHABAL256_HASH_SIZE * 2;
 my $NONCE_SIZE          = $SCOOP_SIZE * $SCOOPS_IN_NONCE;
@@ -33,33 +32,47 @@ my $NONCE_SIZE          = $SCOOP_SIZE * $SCOOPS_IN_NONCE;
 
 GetOptions(
     'help'  => \&print_help,             # keep generated test files
+    'out=s' => \$outdir,
+    'quiet' => \$quiet,
 ) or croak "Formal error processing command line options!";
+
+my $plotpath = $ARGV[0];
+my ($pname,$ppath,$psuffix) = fileparse($plotpath,());
+
+if (defined $outdir) {
+    info("Outdir defined. Copy conversion mode.");
+    if (!-d $outdir) {
+        fail("Given outdir ($outdir) is not a directory.");
+    }
+    if ($outdir eq $ppath) {
+        fail("Given outdir is the same location as plotfile -> use in-place modification.");
+    }
+    $inplace = 0;    # mode of operation: convert copy
+}
+
 
 # }}}
 
-print "Name: $pname\n";
-print "Path: $ppath\n";
 
-my $plotparams    = parse_plotname($pname);
-my $plotsize      = check_plot($plotparams);
-my $block_size    = $plotparams->{nonces} * $SCOOP_SIZE; # how big is a 'scoop block' - we have 4096 of these
-my $tmp_plotpath  = "$plotpath.converting";
-my $plotpath_poc2 = "$ppath/" . get_poc2_name($plotparams);
+$|++;  # make print output unbuffered
 
-my $pos;  # fseek position (used for front/back)
+info("Name: $pname",
+     "Path: $ppath");
+
+my $plotparams    = parse_plotname($pname);                 # get plot structure from filename
+my $plotsize      = check_plot($plotparams);                # see if plot file is consistent with plot filename
+my $block_size    = $plotparams->{nonces} * $SCOOP_SIZE;    # how big is a 'scoop block' - we have 4096 of these
+my $tmp_plotpath  = "$plotpath.converting";                 # temporary filename for in-place conversion
+my $plotpath_poc2 = $inplace ? $ppath : $outdir;
+
+$plotpath_poc2 .= '/' . get_poc2_name($plotparams);
+
+my $pos;          # fseek position (read start position within the plot file)
 my $buffer1;
 my $buffer2;
 my $numread;
 my $numwrite;
 my $numnonces = $plotparams->{nonces};
-
-rename $plotpath, $tmp_plotpath;
-
-open my $handle, '+<:raw', $tmp_plotpath or fail("Failed to open '$plotpath'");
-binmode $handle;
-
-print "processing scoops...\n";
-$|++;
 
 # We assume an optimized PoC1 file (scoop 0 of all nonces, then scoop 1 of all nonces etc...)
 # we read in scoop 0 and scoop 4095 for all nonces, then we swap their MSB 32 bytes
@@ -69,36 +82,86 @@ $|++;
 # our memory requirements for the two buffers are <number of nonces> * 128 bytes
 # => roughly 1/2000th of the plot size (e.g. 5GB for a 10TB plot)
 
-for (my $scoop = 0; $scoop < $SCOOPS_IN_NONCE / 2; $scoop++) {
-    $pos = $scoop * $block_size;
-    seek $handle, $pos, 0; # seek from beginning
-    $numread = sysread $handle, $buffer1, $block_size;
-    fail("read $numread bytes instead of $block_size") if ($numread != $block_size);
-    seek $handle, -($pos + $block_size), 2; # seek from EOF
-    $numread = sysread $handle, $buffer2, $block_size;
-    fail("read $numread bytes instead of $block_size") if ($numread != $block_size);
-    print "$scoop/" . ($SCOOPS_IN_NONCE - $scoop) . ' ';
+info("processing scoops...");
 
-    my $off = 32;
-    # here perform the shuffle-conversion
-    for (my $nonceidx = 0; $nonceidx < $numnonces; $nonceidx++) {
-        my $hash1 = substr $buffer1, $off, $SHABAL256_HASH_SIZE;
-        substr($buffer1, $off, $SHABAL256_HASH_SIZE) = substr($buffer2, $off, $SHABAL256_HASH_SIZE);
-        substr($buffer2, $off, $SHABAL256_HASH_SIZE) = $hash1;
-        $off += $SCOOP_SIZE;
+if ($inplace) {
+    rename $plotpath, $tmp_plotpath;
+
+    open my $handle, '+<:raw', $tmp_plotpath or fail("Failed to open '$plotpath'");
+
+    binmode $handle;
+
+    for (my $scoop = 0; $scoop < $SCOOPS_IN_NONCE / 2; $scoop++) {
+        $pos = $scoop * $block_size;
+        seek $handle, $pos, 0;                   # seek from beginning
+        $numread = sysread $handle, $buffer1, $block_size;
+        fail("read $numread bytes instead of $block_size") if ($numread != $block_size);
+        seek $handle, -($pos + $block_size), 2;  # seek from EOF
+        $numread = sysread $handle, $buffer2, $block_size;
+        fail("read $numread bytes instead of $block_size") if ($numread != $block_size);
+        info("$scoop/" . ($SCOOPS_IN_NONCE - $scoop) . ' ', undef);
+
+        seek $handle, -$block_size, 1;           # seek relative to position
+
+        my $off = 32;
+        # here perform the shuffle-conversion (swap the MSB 32bytes in all nonces)
+        for (my $nonceidx = 0; $nonceidx < $numnonces; $nonceidx++) {
+            my $hash1 = substr $buffer1, $off, $SHABAL256_HASH_SIZE;
+            substr($buffer1, $off, $SHABAL256_HASH_SIZE) = substr($buffer2, $off, $SHABAL256_HASH_SIZE);
+            substr($buffer2, $off, $SHABAL256_HASH_SIZE) = $hash1;
+            $off += $SCOOP_SIZE;
+        }
+
+        $numwrite = syswrite $handle, $buffer2;
+        fail("wrote $numwrite bytes instead of $block_size") if ($numwrite != $block_size);
+        seek $handle, $pos, 0;                   # seek from beginning
+        $numwrite = syswrite $handle, $buffer1;
+        fail("wrote $numwrite bytes instead of $block_size") if ($numwrite != $block_size);
     }
 
-    seek $handle, -($pos + $block_size), 2; # seek from EOF
-    $numwrite = syswrite $handle, $buffer2;
-    fail("wrote $numwrite bytes instead of $block_size") if ($numwrite != $block_size);
-    seek $handle, $pos, 0;          # seek from beginning
-    $numwrite = syswrite $handle, $buffer1;
-    fail("wrote $numwrite bytes instead of $block_size") if ($numwrite != $block_size);
+    close $handle;
+
+    rename $tmp_plotpath, $plotpath_poc2;
+}
+else {                   # copy conversion: we need to pre-allocate target
+    open my $target, ">:raw", $plotpath_poc2 or die $!;
+    truncate $target, -s $plotpath  or die $!;
+    binmode $target;
+
+    open my $source, "<:raw", $plotpath or die $!;
+    binmode $source;
+
+    for (my $scoop = 0; $scoop < $SCOOPS_IN_NONCE / 2; $scoop++) {
+        $pos = $scoop * $block_size;
+        seek $source, $pos, 0;                   # seek from beginning
+        $numread = sysread $source, $buffer1, $block_size;
+        fail("read $numread bytes instead of $block_size") if ($numread != $block_size);
+        seek $source, -($pos + $block_size), 2;  # seek from EOF
+        $numread = sysread $source, $buffer2, $block_size;
+        fail("read $numread bytes instead of $block_size") if ($numread != $block_size);
+        info("$scoop/" . ($SCOOPS_IN_NONCE - $scoop) . ' ', undef);
+
+        my $off = 32;
+        # here perform the shuffle-conversion (swap the MSB 32bytes in all nonces)
+        for (my $nonceidx = 0; $nonceidx < $numnonces; $nonceidx++) {
+            my $hash1 = substr $buffer1, $off, $SHABAL256_HASH_SIZE;
+            substr($buffer1, $off, $SHABAL256_HASH_SIZE) = substr($buffer2, $off, $SHABAL256_HASH_SIZE);
+            substr($buffer2, $off, $SHABAL256_HASH_SIZE) = $hash1;
+            $off += $SCOOP_SIZE;
+        }
+
+        seek $target, -($pos + $block_size), 2; # seek from EOF
+        $numwrite = syswrite $target, $buffer2;
+        fail("wrote $numwrite bytes instead of $block_size") if ($numwrite != $block_size);
+        seek $target, $pos, 0;                   # seek from beginning
+        $numwrite = syswrite $target, $buffer1;
+        fail("wrote $numwrite bytes instead of $block_size") if ($numwrite != $block_size);
+    }
+
+    close $source;
+    close $target;
 }
 
-close $handle;
-
-rename $tmp_plotpath, $plotpath_poc2;
 
 # {{{ parse_plotname               examine given plotname if in optimized PoC1 format
 
@@ -179,6 +242,28 @@ sub fail {
     }
 
     exit 1;
+}
+
+# }}}
+# {{{ info                         inform the user - if desired
+
+sub info {
+    return if ($quiet);
+
+    my @lines   = @_;
+    my $newline = 1;
+
+    if (!defined $lines[-1]) {
+        $newline = 0;
+        pop @lines;
+    }
+
+    for my $line (@lines) {
+        print $line;
+        print "\n" if ($newline);
+    }
+
+    return;
 }
 
 # }}}
