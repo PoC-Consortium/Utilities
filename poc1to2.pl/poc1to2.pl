@@ -59,13 +59,13 @@ $|++;  # make print output unbuffered
 info("Name: $pname",
      "Path: $ppath");
 
-my $plotparams    = parse_plotname($pname);                 # get plot structure from filename
-my $plotsize      = check_plot($plotparams);                # see if plot file is consistent with plot filename
+my $plotparams    = parse_poc1_name($pname);                # get plot structure from filename
+my $plotsize      = check_poc1_plot($plotparams);           # see if plot file is consistent with plot filename
 my $block_size    = $plotparams->{nonces} * $SCOOP_SIZE;    # how big is a 'scoop block' - we have 4096 of these
 my $tmp_plotpath  = "$plotpath.converting";                 # temporary filename for in-place conversion
 my $plotpath_poc2 = $inplace ? $ppath : $outdir;
 
-$plotpath_poc2 .= '/' . get_poc2_name($plotparams);
+$plotpath_poc2 .= '/' . create_poc2_name($plotparams);
 
 my $pos;          # fseek position (read start position within the plot file)
 my $buffer1;
@@ -88,56 +88,42 @@ if ($inplace) {
     rename $plotpath, $tmp_plotpath;
 
     open my $handle, '+<:raw', $tmp_plotpath or fail("Failed to open '$plotpath'");
-
     binmode $handle;
 
-    for (my $scoop = 0; $scoop < $SCOOPS_IN_NONCE / 2; $scoop++) {
-        $pos = $scoop * $block_size;
-        seek $handle, $pos, 0;                   # seek from beginning
-        $numread = sysread $handle, $buffer1, $block_size;
-        fail("read $numread bytes instead of $block_size") if ($numread != $block_size);
-        seek $handle, -($pos + $block_size), 2;  # seek from EOF
-        $numread = sysread $handle, $buffer2, $block_size;
-        fail("read $numread bytes instead of $block_size") if ($numread != $block_size);
-        info("$scoop/" . ($SCOOPS_IN_NONCE - $scoop) . ' ', undef);
-
-        seek $handle, -$block_size, 1;           # seek relative to position
-
-        my $off = 32;
-        # here perform the shuffle-conversion (swap the MSB 32bytes in all nonces)
-        for (my $nonceidx = 0; $nonceidx < $numnonces; $nonceidx++) {
-            my $hash1 = substr $buffer1, $off, $SHABAL256_HASH_SIZE;
-            substr($buffer1, $off, $SHABAL256_HASH_SIZE) = substr($buffer2, $off, $SHABAL256_HASH_SIZE);
-            substr($buffer2, $off, $SHABAL256_HASH_SIZE) = $hash1;
-            $off += $SCOOP_SIZE;
-        }
-
-        $numwrite = syswrite $handle, $buffer2;
-        fail("wrote $numwrite bytes instead of $block_size") if ($numwrite != $block_size);
-        seek $handle, $pos, 0;                   # seek from beginning
-        $numwrite = syswrite $handle, $buffer1;
-        fail("wrote $numwrite bytes instead of $block_size") if ($numwrite != $block_size);
-    }
+    shuffle_poc1to2($handle, $handle); # in-place shuffling: source and target file are the same
 
     close $handle;
 
     rename $tmp_plotpath, $plotpath_poc2;
 }
 else {                   # copy conversion: we need to pre-allocate target
-    open my $target, ">:raw", $plotpath_poc2 or die $!;
-    truncate $target, -s $plotpath  or die $!;
-    binmode $target;
+    my $target = preallocate($plotpath_poc2, -s $plotpath);
 
     open my $source, "<:raw", $plotpath or die $!;
     binmode $source;
 
+    shuffle_poc1to2($source, $target); # copy-on-write shuffling: source and target file are different
+
+    close $source;
+    close $target;
+}
+
+
+### PLOT OPERATIONS
+
+# {{{ shuffle_poc1to2              shuffle operation PoC1 to PoC2 (theoretically also vice versa)
+
+sub shuffle_poc1to2 {
+    my $src_fh = shift; # source filehandle
+    my $tgt_fh = shift; # target filehandle
+
     for (my $scoop = 0; $scoop < $SCOOPS_IN_NONCE / 2; $scoop++) {
         $pos = $scoop * $block_size;
-        seek $source, $pos, 0;                   # seek from beginning
-        $numread = sysread $source, $buffer1, $block_size;
+        seek $src_fh, $pos, 0;                   # seek from beginning
+        $numread = sysread $src_fh, $buffer1, $block_size;
         fail("read $numread bytes instead of $block_size") if ($numread != $block_size);
-        seek $source, -($pos + $block_size), 2;  # seek from EOF
-        $numread = sysread $source, $buffer2, $block_size;
+        seek $src_fh, -($pos + $block_size), 2;  # seek from EOF
+        $numread = sysread $src_fh, $buffer2, $block_size;
         fail("read $numread bytes instead of $block_size") if ($numread != $block_size);
         info("$scoop/" . ($SCOOPS_IN_NONCE - $scoop) . ' ', undef);
 
@@ -150,22 +136,21 @@ else {                   # copy conversion: we need to pre-allocate target
             $off += $SCOOP_SIZE;
         }
 
-        seek $target, -($pos + $block_size), 2; # seek from EOF
-        $numwrite = syswrite $target, $buffer2;
+        seek $tgt_fh, -($pos + $block_size), 2;   # seek from EOF
+        $numwrite = syswrite $tgt_fh, $buffer2;
         fail("wrote $numwrite bytes instead of $block_size") if ($numwrite != $block_size);
-        seek $target, $pos, 0;                   # seek from beginning
-        $numwrite = syswrite $target, $buffer1;
+        seek $tgt_fh, $pos, 0;                   # seek from beginning
+        $numwrite = syswrite $tgt_fh, $buffer1;
         fail("wrote $numwrite bytes instead of $block_size") if ($numwrite != $block_size);
     }
 
-    close $source;
-    close $target;
+    return;
 }
 
+# }}}
+# {{{ parse_poc1_name              check and parse given PoC1 plotname (if in optimized PoC1 format)
 
-# {{{ parse_plotname               examine given plotname if in optimized PoC1 format
-
-sub parse_plotname {
+sub parse_poc1_name {
     my $plotname = shift;
 
     # check if plotfile name is ok
@@ -182,15 +167,14 @@ sub parse_plotname {
                  "The Burst plotfile named '$plotname' seems not to be an optimized PoC1 plot.");
         }
     }
-    else {
-        fail("The Burst plotfile named '$plotname' has not expected format.");
-    }
+
+    return fail("The file named '$plotname' does not look like a known PoC1 plotfile.");
 }
 
 # }}}
-# {{{ check_plot                   check the plot consistency
+# {{{ check_poc1_plot              check the PoC1 plot file consistency (size is what filename says)
 
-sub check_plot {
+sub check_poc1_plot {
     my $plotstruct = shift;
 
     my $real_plotsize     = -s $plotpath;
@@ -204,12 +188,29 @@ sub check_plot {
 }
 
 # }}}
-# {{{ get_poc2_name                create PoC2 plot filename
+# {{{ create_poc2_name             create PoC2 plot filename
 
-sub get_poc2_name {
+sub create_poc2_name {
     my $plotstruct = shift;
 
     return $plotstruct->{id} . '_' . $plotstruct->{offset} . '_' . $plotstruct->{nonces};
+}
+
+# }}}
+
+### HELPERS
+
+# {{{ preallocate                  pre-allocate file/path of a specific size
+
+sub preallocate {
+    my $path = shift;
+    my $size = shift;
+
+    open my $target, ">:raw", $path or die $!;
+    truncate $target, $size  or die $!;
+    binmode $target;
+
+    return $target;
 }
 
 # }}}
