@@ -14,11 +14,12 @@ use Getopt::Long;                                                # command line 
 # }}}
 # {{{ var block
 
-# CLI param defaults;
+# CLI param defaults
 
-my $quiet = 0;      # quiet = 0 => we are verbose
-my $outdir;         # undefined => plot file in-place modification
+my $memory;         # define memory constraints; default: unlimited
 my $inplace = 1;    # default mode of operation: convert in-place
+my $outdir;         # undefined => plot file in-place modification
+my $quiet = 0;      # quiet = 0 => we are verbose
 
 # some plot constants
 
@@ -31,12 +32,18 @@ my $NONCE_SIZE          = $SCOOP_SIZE * $SCOOPS_IN_NONCE;
 # {{{ CLI processing
 
 GetOptions(
-    'help'  => \&print_help,             # keep generated test files
+    'mem=i' => \$memory,                # divide processing blocks into N fragments
+    'help'  => \&print_help,            # keep generated test files
     'out=s' => \$outdir,
     'quiet' => \$quiet,
 ) or croak "Formal error processing command line options!";
 
 my $plotpath = $ARGV[0];
+
+if (!-r $plotpath) {
+    fail("Given plotfile '$plotpath' unreadable or nonexistant.");
+}
+
 my ($pname,$ppath,$psuffix) = fileparse($plotpath,());
 
 if (defined $outdir) {
@@ -50,20 +57,34 @@ if (defined $outdir) {
     $inplace = 0;    # mode of operation: convert copy
 }
 
-
 # }}}
-
 
 $|++;  # make print output unbuffered
 
 info("Name: $pname",
      "Path: $ppath");
 
-my $plotparams    = parse_poc1_name($pname);                # get plot structure from filename
-my $plotsize      = check_poc1_plot($plotparams);           # see if plot file is consistent with plot filename
-my $block_size    = $plotparams->{nonces} * $SCOOP_SIZE;    # how big is a 'scoop block' - we have 4096 of these
-my $tmp_plotpath  = "$plotpath.converting";                 # temporary filename for in-place conversion
-my $plotpath_poc2 = $inplace ? $ppath : $outdir;
+my $plotparams     = parse_poc1_name($pname);          # get plot structure from filename
+my $plotsize       = check_poc1_plot($plotparams);     # see if plot file is consistent with plot filename
+my $numnonces      = $plotparams->{nonces};            # number of nonces in scoop
+my $tmp_plotpath   = "$plotpath.converting";           # temporary filename for in-place conversion
+my $plotpath_poc2  = $inplace ? $ppath : $outdir;      # location of PoC2 plot
+my $block_size     = $numnonces * $SCOOP_SIZE;         # how big is a 'scoop block' - we have 4096 of these
+my $used_memMB     = $block_size / 524288;             # memory in MB that is going to be used
+my $process_nonces = $numnonces;                       # nonces to process per batch (default: all)
+my $work_size      = $block_size;                      # worksize block (default: complete/all nonces)
+
+if (defined $memory && $memory < $used_memMB) {        # if our memory constraints are smaller than needed
+    $process_nonces = $memory * 8192;                  # 1 MB / 128 byte (2 SCOOPS) = 8192
+    $work_size      = $process_nonces * $SCOOP_SIZE;   # our smaller block
+    info("applying memory constraints: max buffer $memory MB",
+         "resulting in processing $process_nonces nonces (instead of $numnonces) at a time.");
+    exit 0;
+#    print "TEST: process nonces: $process_nonces * 2 * $SCOOP_SIZE = " . $process_nonces * 2 * $SCOOP_SIZE . "\n";
+}
+else {
+    info('memory to be used: ' . sprintf("%.3f MB", $used_memMB));
+}
 
 $plotpath_poc2 .= '/' . create_poc2_name($plotparams);
 
@@ -72,7 +93,6 @@ my $buffer1;
 my $buffer2;
 my $numread;
 my $numwrite;
-my $numnonces = $plotparams->{nonces};
 
 # We assume an optimized PoC1 file (scoop 0 of all nonces, then scoop 1 of all nonces etc...)
 # we read in scoop 0 and scoop 4095 for all nonces, then we swap their MSB 32 bytes
@@ -99,7 +119,7 @@ if ($inplace) {
 else {                   # copy conversion: we need to pre-allocate target
     my $target = preallocate($plotpath_poc2, -s $plotpath);
 
-    open my $source, "<:raw", $plotpath or die $!;
+    open my $source, '<:raw', $plotpath or die $!;
     binmode $source;
 
     shuffle_poc1to2($source, $target); # copy-on-write shuffling: source and target file are different
@@ -114,8 +134,8 @@ else {                   # copy conversion: we need to pre-allocate target
 # {{{ shuffle_poc1to2              shuffle operation PoC1 to PoC2 (theoretically also vice versa)
 
 sub shuffle_poc1to2 {
-    my $src_fh = shift; # source filehandle
-    my $tgt_fh = shift; # target filehandle
+    my $src_fh = shift;       # source filehandle
+    my $tgt_fh = shift;       # target filehandle
 
     for (my $scoop = 0; $scoop < $SCOOPS_IN_NONCE / 2; $scoop++) {
         $pos = $scoop * $block_size;
@@ -228,6 +248,11 @@ sub print_help {
     --help
       This help
 
+    --mem <megabyte>
+      Memory constraint to use less memory than the script would have used
+      without any constraints (1/2000th of plot size)
+      Given in megabyte, so -m 1000 will use roughly 1GB of memory
+
     --out <directory>
       Define a directory to write the converted plot file to. This switches
       to copy on write mode. (Else in-place is default) and allows you to
@@ -244,7 +269,7 @@ EOH
 }
 
 # }}}
-# {{{ fail                         print lines wit failure information and exit
+# {{{ fail                         print lines with failure information and exit
 
 sub fail {
     my @lines = @_;
