@@ -10,12 +10,11 @@ use Carp;
 use Crypt::Mode::CBC;
 use Crypt::Curve25519;
 use Data::Dumper;
-use Digest::SHA qw(sha256 sha256_hex);
+use Digest::SHA          qw(sha256);
 use File::Basename;
 use Getopt::Long;                                                # command line options processing
 use JSON;
-use Time::HiRes;
-
+use LWP::UserAgent;
 
 # }}}
 # {{{ var block
@@ -35,6 +34,7 @@ my $id         = 0;                # numeric Id of the miner
 my $action;                        # no action
 
 my $json = JSON->new;
+my $ua   = LWP::UserAgent->new;
 
 # }}}
 # {{{ CLI processing
