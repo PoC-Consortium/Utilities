@@ -7,14 +7,15 @@ use strict;
 use warnings;
 
 use Carp;
+use Crypt::Mode::CBC;
+use Crypt::Curve25519;
 use Data::Dumper;
-#use Crypt::Cipher::AES;
 use Digest::SHA qw(sha256 sha256_hex);
 use File::Basename;
 use Getopt::Long;                                                # command line options processing
+use JSON;
 use Time::HiRes;
-use Crypt::Mode::CBC;
-use Crypt::Curve25519;
+
 
 # }}}
 # {{{ var block
@@ -30,8 +31,10 @@ my $scoop  = 1;                    # scoop number
 my $gensig = 2**32 - 1;            # previous block gensig
 
 my $splot_size = 0;                # size of the synthetic plot in NONCES
-my $id         = 0;
-my $action;
+my $id         = 0;                # numeric Id of the miner
+my $action;                        # no action
+
+my $json = JSON->new;
 
 # }}}
 # {{{ CLI processing
@@ -49,7 +52,7 @@ GetOptions(
 my $plotpath = $ARGV[0] // fail('No plotfile given.');
 
 if (defined $action) {
-    if ($action eq 'o2o') {
+    if ($action eq 'o2i') {
         orig2individual($plotpath, $id);
     }
     else {
@@ -89,27 +92,28 @@ sub mine_poc3 {
     my $seekok     = 1;
     my $pos        = $scoop * $chunksize;    # initial position
     my $iterations = 64;                     # maximum number of RB decisions (64bit gensig)
-    my $buffer;                              # buffer for reading chunk
+    my $buffer_off;                          # buffer for reading offset chunk
+    my $buffer_data;                         # buffer for reading data chunk
     my $numread;                             # kep track of read bytes
-    my @offsets;
+    my @scoops;
 
     print "Mining $plot ($plotsize bytes) - simulating scoop $scoop\n";
 
     open my $handle, '<:raw', $plot or fail("Failed to open '$plot'");
   PLOTREAD_LOOP:
     while ($iterations--) {
-        print "DEBUG: Reading 64bytes at POS: $pos\n";
+        # print "DEBUG: Reading 64bytes at POS: $pos\n";
 
         seek($handle, $pos, 0) || last PLOTREAD_LOOP;
 
-        sysread $handle, $buffer, 4;
-        push @offsets, (unpack "L", $buffer);
-
-        $numread = sysread $handle, $buffer, $SSIZE;
+        sysread $handle, $buffer_off, 4;
+        $numread = sysread $handle, $buffer_data, $SSIZE;
         fail("read $numread bytes instead of 64") if ($numread != 64);
 
-        my $hex  = unpack 'H*', $buffer;
-        print "read value $hex\n";
+        push @scoops, {
+            off  => (unpack "L", $buffer_off),
+            data => (unpack 'H*', $buffer_data),
+        };
 
         $pos = $NONCE * 2**(63-$iterations) + $scoop * $chunksize * 2**(64-$iterations);
         $pos++ if ($gensig & 1);
@@ -118,6 +122,11 @@ sub mine_poc3 {
         $gensig = $gensig >> 1;
     }
     close $handle;
+
+    # send this via JSON to the verifier
+    print "Mined this shit:\n";
+    print $json->encode(\@scoops);
+    print "\n";
 
     return;
 }
