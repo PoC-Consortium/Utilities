@@ -101,8 +101,6 @@ sub mine_poc3 {
     open my $handle, '<:raw', $plot or fail("Failed to open '$plot'");
   PLOTREAD_LOOP:
     while ($iterations--) {
-        # print "DEBUG: Reading 64bytes at POS: $pos\n";
-
         seek($handle, $pos, 0) || last PLOTREAD_LOOP;
 
         $numread = sysread $handle, $buffer_off, 4;
@@ -111,15 +109,16 @@ sub mine_poc3 {
         fail("read $numread bytes instead of $SSIZE") if ($numread != $SSIZE);
 
         push @scoops, {
-            off  => (unpack "L", $buffer_off),
+            off  => (unpack "N", $buffer_off),
             data => (unpack 'H*', $buffer_data),
         };
 
+        # RB walkthrough
         $pos = $NONCE * 2**(63-$iterations) + $scoop * $chunksize * 2**(64-$iterations);
         $pos++ if ($gensig & 1);
 
         last PLOTREAD_LOOP if ($pos > $plotsize - $chunksize);
-        $gensig = $gensig >> 1;
+        $gensig = $gensig >> 1;  # shift to the next bit in gensig
     }
     close $handle;
 
