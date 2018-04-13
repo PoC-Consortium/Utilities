@@ -48,7 +48,6 @@ GetOptions(
     'scoop=i'  => \$scoop,
 ) or croak "Formal error processing command line options!";
 
-
 my $plotpath = $ARGV[0] // fail('No plotfile given.');
 
 if (defined $action) {
@@ -56,7 +55,7 @@ if (defined $action) {
         orig2individual($plotpath, $id);
     }
     else {
-        fail('Not implemented yet.');
+        individual2orig($plotpath);
     }
     exit 0;
 }
@@ -106,9 +105,10 @@ sub mine_poc3 {
 
         seek($handle, $pos, 0) || last PLOTREAD_LOOP;
 
-        sysread $handle, $buffer_off, 4;
+        $numread = sysread $handle, $buffer_off, 4;
+        fail("read $numread bytes instead of 4")      if ($numread != 4);
         $numread = sysread $handle, $buffer_data, $SSIZE;
-        fail("read $numread bytes instead of 64") if ($numread != 64);
+        fail("read $numread bytes instead of $SSIZE") if ($numread != $SSIZE);
 
         push @scoops, {
             off  => (unpack "L", $buffer_off),
@@ -132,7 +132,7 @@ sub mine_poc3 {
 }
 
 # }}}
-# {{{ orig2individual              individualize a PoC3 plot to Miner numericID
+# {{{ orig2individual              individualize a PoC3 base plot to Miner numericID
 
 sub orig2individual {
     my $file = shift;         # name of the PoC3 plot file
@@ -153,31 +153,74 @@ sub orig2individual {
     my $numread;              # keep track of bytes read
     my $numwrite;             # keep track of bytes written
     my $buffer;
-    my $cbc = Crypt::Mode::CBC->new('AES', $SSIZE);  # prepare AES encryption of chunk
+    my $scoops = ($size / $SSIZE);                      # number of scoops in base file
+    my $cbc    = Crypt::Mode::CBC->new('AES', $SSIZE);  # prepare AES encryption of chunk
 
-    open my $handle, '<:raw', $file         or fail("Failed to open input '$file'");
-    open my $poc3_fh, '>:raw', "$file.poc3" or fail("Failed to open output '$file.poc3'");
+    open my $base_fh, '<:raw', $file              or fail("Failed to open input '$file'");
+    open my $poc3_fh, '>:raw', "${id}_$file.poc3" or fail("Failed to open output '$file.poc3'");
 
-    for (my $idx = 0; $idx < ($size / $SSIZE); $idx++) {    # we may need Math::BigInt for sizes > 2^64 (16777216 TB)
-        $numread = sysread $handle, $buffer, $SSIZE;        # read chunk and check if read ok, bail else
+    for (my $idx = 0; $idx < $scoops; $idx++) {             # we may need Math::BigInt for sizes > 2^64 (16777216 TB)
+        my ($key, $off) = determine_key($id, $idx);         # determine key
+        my $iv          = pack "QQ", $off, $idx;            # build IV
+
+        $numread = sysread $base_fh, $buffer, $SSIZE;       # read chunk and check if read ok, bail else
         fail("read $numread bytes instead of $SSIZE") if ($numread != $SSIZE);
-        # print "IDX: $idx\n";
-        my ($key, $off) = determine_key($id, $idx);              # determine key
-        my $iv          = pack "QQ", $off, $idx;                 # build IV
-        my $ciphertext  = $cbc->encrypt($buffer, $key, $iv);     # encrypt chunk with 256bit AES
 
-        $off      = pack "L", $off;
-        $numwrite = syswrite $poc3_fh, $off . $ciphertext;
-        fail("wrote $numwrite bytes instead of $SSIZE") if ($numwrite != $SSIZE + 4);
-        print $idx, '/', ($size / $SSIZE), "\n";
-        # print "LEN: ", length($ciphertext), " key: $key_hex OFF: $off\n";
-        #print "ORIG:  ", unpack("H*", $buffer), "\n";
-        #print "INDIV: ", unpack("H*", $ciphertext), "\n";
-        #my $plaintext = $cbc->decrypt($ciphertext, $key, $iv);
-        #print "BACK:  ", unpack("H*", $plaintext), "\n";
+        $numwrite = syswrite $poc3_fh, pack "N", $off;                        # write SHA256 offset
+        fail("wrote $numwrite bytes instead of 4") if ($numwrite != 4);
+        $numwrite = syswrite $poc3_fh, $cbc->encrypt($buffer, $key, $iv);     # write 256bit AES encrypted data
+        fail("wrote $numwrite bytes instead of $SSIZE") if ($numwrite != $SSIZE);
+
+        print "$idx/$scoops\n";
     }
+
     close $poc3_fh;
-    close $handle;
+    close $base_fh;
+
+    return;
+}
+
+# }}}
+# {{{ individual2orig              de-individualize a PoC3 plot
+
+sub individual2orig {
+    my $file = shift;
+
+    my $size = -s $file;                               # get length of the original file
+    if ($size % ($SSIZE + 4)) {                        # make sure it is padded correctly
+        fail("PoC3 individual file not right size");   # bail out else
+    }
+
+    my ($numid, $base) = parse_poc3_filename($file);             # extract numericId and base name from PoC3 file
+    my $scoops         = $size / ($SSIZE + 4);                   # number of scoops in PoC3 file
+    my $cbc            = Crypt::Mode::CBC->new('AES', $SSIZE);   # prepare AES encryption of chunk
+    my $buffer;                                                  # buffer for reading offset chunk
+    my $numread;
+
+    open my $poc3_fh, '<:raw', $file or fail("Failed to open input '$file'");
+    open my $base_fh, '>:raw', $base or fail("Failed to open output '$base'");
+
+    for (my $idx = 0; $idx < $scoops; $idx++) {             # we may need Math::BigInt for sizes > 2^64 (16777216 TB)
+        $numread = sysread $poc3_fh, $buffer, 4;
+        fail("read $numread bytes instead of 4")      if ($numread != 4);
+        my $off = unpack "N", $buffer;                      # pack the SHA256 offset
+
+        $numread = sysread $poc3_fh, $buffer, $SSIZE;
+        fail("read $numread bytes instead of $SSIZE") if ($numread != $SSIZE);
+
+        my $ec   = unpack "Q", curve25519_public_key(pack("QQQQ", $idx, $numid, $idx, $numid));
+        my $key  = sha256(pack "Q", ($ec + $off));          # 64bit key (EC + PoW offset) used for AES encryption
+        my $iv   = pack "QQ", $off, $idx;                   # build IV
+
+        print $base_fh $cbc->decrypt($buffer, $key, $iv);   # write the decrypted data
+
+        print "$idx/$scoops\n";
+    }
+
+    close $base_fh;
+    close $poc3_fh;
+
+    return;
 }
 
 # }}}
@@ -216,16 +259,15 @@ sub determine_key {
     my $id  = shift;  # numeric Id of miner
     my $idx = shift;  # index of data chunk
 
-    my $off = 1;      # we start with offset 1 (never compute just the EC result)
-    my $key;
+    my $off;          # below, we start with offset 1 (never compute just the EC result)
 
     # compute a 25519 EC out of interleaved chunk idx and miner id
     # this is pretty ASIC proof
-    $idx = unpack "Q", curve25519_public_key(pack("QQQQ", $idx,$id,$idx,$id));
+    $idx = unpack "Q", curve25519_public_key(pack("QQQQ", $idx, $id, $idx, $id));
 
     while (1) {
-        my $data = pack "Q", ($idx + $off++);     # get 64bit input data for hash function
-           $key  = sha256($data);                 # key used for AES encryption
+        my $data = pack "Q", ($idx + ++$off);     # get 64bit input data for hash function
+        my $key  = sha256($data);                 # key used for AES encryption
         my @val  = unpack "QQQLSS", $key;         # dissect key (64,64,64,32,16,16 bit)
 
         # check if last unsigned word is 0 (on average one in 65536)
@@ -236,6 +278,23 @@ sub determine_key {
     }
 
     fail("Could not find any offset. Should never happen. I shouldn't even be here!");
+
+    return;
+}
+
+# }}}
+# {{{ parse_poc3_filename          extract information from filename
+
+sub parse_poc3_filename {
+    my $name = shift;
+
+    if ($name =~ m{(?<numid>\d+)_(?<base>.+)\.poc3}xms) {
+        return ($+{numid}, $+{base});
+    }
+    else {
+        fail("$name is not a poc3 filename");
+    }
+
     return;
 }
 
