@@ -1,0 +1,133 @@
+#!/bin/bash
+
+DEPLOYDIR=.
+
+MY_SELF=$0
+MY_CMD=$1
+MY_ARG1=$2
+MY_ARG2=$3
+
+MY_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+
+WALLET_DEV=http://wallet.dev.burst-test.net:6876
+WALLET_STAG=http://wallet.burst-test.net:6876
+
+WALLET_PDEV=http://pool.dev.burst-test.net
+WALLET_PSTAG=http://pool.burst-test.net
+
+WALLET_MAIN=https://wallet.burst.cryptoguru.org:8125
+
+
+function usage() {
+    cat << EOF
+usage: $0 [command] [arguments]
+
+  help                          shows the help you're just reading
+  plot <size>                   make a plot <size> GiB for some random Id
+  mine <DEV|STAG|MAIN> <id(s)>  solo-mine on one of the Networks with Id(s)
+  mine <PDEV|PSTAG> <id(s)>     pool-mine on one of the Networks with Id(s)
+                                don't forget to set reward recipient
+
+Usage sequence:
+
+> plotbot                           <--- init the whole thing
+
+> plotbot plot 5                    <--- plot 5 GiB (here you get the numid)
+(repeat if you want)
+
+> plotbot mine DEV <Id1> <Id2>      <--- if you mine on DEV TestNet
+EOF
+}
+
+function init () {
+    MISSING=0
+    if [ -z `which git 2>/dev/null` ]; then
+        echo "please install git"
+        MISSING=1
+    fi
+    if [ -z `which gcc 2>/dev/null` ]; then
+        echo "please install gcc"
+        MISSING=1
+    fi
+    if [ -z `which make 2>/dev/null` ]; then
+        echo "please install make"
+        MISSING=1
+    fi
+
+    if [[ $MISSING -eq 1 ]]; then
+        echo "make sure, you have git, gcc and make installed"
+        exit 1
+    fi
+
+    mkdir -p $DEPLOYDIR
+    cd $DEPLOYDIR
+    if [ ! -f cg_obup ]; then
+        git clone https://github.com/PoC-Consortium/cg_obup.git > /dev/null && \
+        cd cg_obup && \
+        make > /dev/null && \
+        cd ..
+    fi
+    if [ ! -f mdcct ]; then
+        git clone https://github.com/Mirkic7/mdcct.git > /dev/null && \
+        cd mdcct && \
+        make > /dev/null && \
+        cd ..
+    fi
+}
+
+function plot () {
+    # first we need to get a numericId from a random, but reproducible passphrase
+    PASSPHRASE=$(dd if=/dev/urandom bs=64 count=1 2> /dev/null | sha256sum -b | cut -f 1 -d ' ')
+    NUMID=$(curl -s -o- "$WALLET_MAIN/burst?" --data "requestType=getAccountId&secretPhrase=$PASSPHRASE" | grep -Eo '"account":"[^"]+"' | grep -Eo '\-?[0-9]+')
+
+    echo "#### Plotting $1 GiB for Id $NUMID to $DEPLOYDIR/$NUMID"     # inform user
+    
+    echo "$PASSPHRASE : $NUMID" >> secret-numid.txt         # store both for later lookup
+    mkdir -p $DEPLOYDIR/$NUMID                              # create a directory for the id
+    echo $PASSPHRASE > $DEPLOYDIR/$NUMID/passphrases.txt    # create passphrases.txt for mdcct
+    cp $DEPLOYDIR/mdcct/mine  $DEPLOYDIR/$NUMID/            # copy miner
+    let "NONCES = $1 * 4096"                                # there are 4096 nonces per gigabyte
+
+    # finally, plot number of gigabytes in the directory with current Numid
+    $DEPLOYDIR/cg_obup/plot64 -k $NUMID -x 2 -m 4096 -s 0 -n $NONCES -a -d $DEPLOYDIR/$NUMID
+}
+
+function mine () {
+    shift 2
+    eval TYPE='$'WALLET_$1
+    echo $TYPE
+    shift
+    
+    for ID in "$@"
+    do
+        (cd $DEPLOYDIR/$ID ; nohup ./mine $TYPE . ) &
+    done
+}
+
+if [[ $# -gt 0 ]] ; then
+    case "$MY_CMD" in
+        "init")
+            init
+            ;;
+        "mine")
+            mine $MY_ARG1 "$@"
+            ;;
+        "plot") # id size
+            plot $MY_ARG1
+            ;;
+        *)
+            usage
+            ;;
+    esac
+else
+    if [[ ! -f FIRSTRUN ]]; then
+        echo "#### First run, setting up environment"
+        echo
+        touch FIRSTRUN
+        init
+        echo
+        echo "#### Done. Now you can plot - usage:"
+        echo
+    fi
+    usage
+fi

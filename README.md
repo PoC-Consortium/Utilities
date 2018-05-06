@@ -6,6 +6,10 @@ Various Utilities, Tidbits and Prototypes
 
 The files behind http://package.cryptoguru.org
 
+## plotbot
+
+Manage your plotter / miner phalanx.
+
 ## poc1to2.pl
 
 PoC1->PoC2 converter (in-place and copy-on-write) written in
