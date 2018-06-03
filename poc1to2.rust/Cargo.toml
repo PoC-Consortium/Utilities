@@ -1,0 +1,10 @@
+[package]
+name = "poc1to2"
+version = "0.1.0"
+authors = ["PoC Consortium <bots@cryptoguru.org>"]
+
+[dependencies]
+clap = "~2.30"
+
+[dev-dependencies]
+md5 = "^0.3.7"
