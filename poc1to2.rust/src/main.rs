@@ -99,6 +99,8 @@ impl<'a> Plot<'a> {
         let mut buffer2 = vec![0; block_size as usize];
 
         let mut to = if self.inline {
+            OpenOptions::new().write(true).open(self.path).unwrap()
+        } else {
             let mut p = PathBuf::from(self.out_dir);
             p.push(self.poc2_name());
             let f = File::create(&p).unwrap();
@@ -106,8 +108,6 @@ impl<'a> Plot<'a> {
                 panic!("failed to preallocate size {}", self.size);
             };
             OpenOptions::new().write(true).open(p.as_path()).unwrap()
-        } else {
-            OpenOptions::new().write(true).open(self.path).unwrap()
         };
 
         if !quiet { println!("start processing sccops"); };
@@ -139,10 +139,10 @@ impl<'a> Plot<'a> {
             to.write_all(&buffer1).unwrap();
         }
 
-        if !self.inline {
+        if self.inline {
             let out = PathBuf::from(self.out_dir).join(self.poc2_name());
             fs::rename(self.path, out).unwrap();
-        }
+        };
     }
 
     fn poc2_name(&self) -> String {
