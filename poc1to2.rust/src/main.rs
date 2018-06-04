@@ -92,7 +92,7 @@ impl<'a> Plot<'a> {
         }
     }
 
-    fn convert(&self) {
+    fn convert(&self, quiet: bool) {
         let mut from = File::open(self.path).unwrap();
         let block_size = self.nonces * SCOOP_SIZE;
         let mut buffer1 = vec![0; block_size as usize];
@@ -110,6 +110,7 @@ impl<'a> Plot<'a> {
             OpenOptions::new().write(true).open(self.path).unwrap()
         };
 
+        if !quiet { println!("start processing sccops"); };
         for scoop in 0i64 .. SCOOPS_IN_NONCE / 2 {
             let pos = scoop * block_size;
 
@@ -118,6 +119,8 @@ impl<'a> Plot<'a> {
 
             from.seek(SeekFrom::End(-pos - block_size)).unwrap();
             from.read_exact(&mut buffer2).unwrap();
+
+            if !quiet { print!("{}/{} ", scoop, SCOOPS_IN_NONCE - scoop); };
 
             let mut off: usize = 32;
             for _ in 0 .. self.nonces {
@@ -162,10 +165,16 @@ fn main() {
 to copy on write mode. (Else in-place is default) and allows you to
 fasten up the conversion at the expense of temporary additional HDD
 space.")
-             .takes_value(true)).get_matches();
+             .takes_value(true))
+        .arg(Arg::with_name("quiet")
+             .short("q")
+             .long("quiet")
+             .help("Quiet operation. Really quiet - no output at all (except failures).
+You can send the process into background and forget about it.")).get_matches();
 
+    let quiet = matches.is_present("quiet");
     let plot = Plot::new(matches.value_of("in").unwrap(), matches.value_of("out"));
-    plot.convert();
+    plot.convert(quiet);
 }
 
 #[cfg(test)]
@@ -188,7 +197,7 @@ mod tests {
         let poc2_plot_file = PathBuf::from(plot.out_dir).join(plot.poc2_name());
         assert_eq!(poc2_plot_file.to_str().unwrap(), "test_data/11253871103436815155_0_10");
 
-        plot.convert();
+        plot.convert(true);
         let mut buffer = Vec::new();
         File::open(&poc2_plot_file).unwrap().read_to_end(&mut buffer);
 
