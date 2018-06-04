@@ -18,12 +18,32 @@ struct Plot<'a> {
     nonces: i64,
     size: u64,
     path: &'a Path,
-    out_dir: Option<&'a Path>
+    out_dir: &'a Path,
+    inline: bool,
 }
 
 impl<'a> Plot<'a> {
     fn new(path: &'a str, out: Option<&'a str>) -> Plot<'a> {
-        let parts: Vec<&str> = path.split("_").collect();
+        let path = Path::new(path);
+        if !path.exists() {
+            panic!("plot path does not exists");
+        };
+        if !path.is_file() {
+            panic!("plot path is not a file");
+        };
+
+        let (out_dir, inline) = if out.is_some() {
+            let out_dir = Path::new(out.unwrap());
+            if !out_dir.is_dir() {
+                panic!("{} is not not a directory", out.unwrap());
+            }
+            (out_dir, false)
+        } else {
+            (path.parent().unwrap(), true)
+        };
+
+        let plot_file = path.file_name().unwrap().to_str().unwrap();
+        let parts: Vec<&str> = plot_file.split("_").collect();
         if parts.len() < 4 {
             panic!("plot file has wrong format")
         }
@@ -48,14 +68,6 @@ impl<'a> Plot<'a> {
             panic!("stagger of plotfile has wrong format")
         }
 
-        let path = Path::new(path);
-        if !path.exists() {
-            panic!("plot path does not exists");
-        };
-        if !path.is_file() {
-            panic!("plot path is not a file");
-        };
-
         let nonces = nonces_res.unwrap();
         let stagger = stagger_res.unwrap();
         if nonces != stagger {
@@ -68,23 +80,15 @@ impl<'a> Plot<'a> {
             panic!("expected plot size {} but got {}", exp_size, size);
         };
 
-        let out_dir = if out.is_some() {
-            let out_dir = Path::new(out.unwrap());
-            if !out_dir.is_dir() {
-                panic!("{} is not not a directory", out.unwrap());
-            }
-            Some(out_dir)
-        } else {
-            None
-        };
 
-        Plot{
+        Plot {
             id: id_res.unwrap(),
             offset: offset_res.unwrap(),
             nonces: nonces,
             size: size,
             path: path,
-            out_dir: out_dir
+            out_dir: out_dir,
+            inline: inline,
         }
     }
 
@@ -94,8 +98,8 @@ impl<'a> Plot<'a> {
         let mut buffer1 = vec![0; block_size as usize];
         let mut buffer2 = vec![0; block_size as usize];
 
-        let mut to = if self.out_dir.is_some() {
-            let mut p = PathBuf::from(self.out_dir.unwrap());
+        let mut to = if self.inline {
+            let mut p = PathBuf::from(self.out_dir);
             p.push(self.poc2_name());
             let f = File::create(&p).unwrap();
             if f.set_len(self.size).is_err() {
@@ -144,8 +148,8 @@ impl<'a> Plot<'a> {
             }
         }
 
-        if self.out_dir.is_none() {
-            let out = PathBuf::from(self.path.parent().unwrap()).join(self.poc2_name());
+        if !self.inline {
+            let out = PathBuf::from(self.out_dir).join(self.poc2_name());
             fs::rename(self.path, out).unwrap();
         }
     }
@@ -183,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_plot() {
-        let plot_file = "11253871103436815155_0_10_10";
+        let plot_file = "test_data/11253871103436815155_0_10_10";
         fs::copy(plot_file.to_owned() + ".orig", plot_file);
 
         let plot = Plot::new(plot_file, None);
@@ -193,8 +197,8 @@ mod tests {
         assert_eq!(plot.nonces, 10);
         assert_eq!(plot.path, Path::new(plot_file));
 
-        let poc2_plot_file = plot.poc2_name();
-        assert_eq!(poc2_plot_file, "11253871103436815155_0_10");
+        let poc2_plot_file = PathBuf::from(plot.out_dir).join(plot.poc2_name());
+        assert_eq!(poc2_plot_file.to_str().unwrap(), "test_data/11253871103436815155_0_10");
 
         plot.convert();
         let mut buffer = Vec::new();
