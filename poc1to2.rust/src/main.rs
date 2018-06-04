@@ -114,16 +114,10 @@ impl<'a> Plot<'a> {
             let pos = scoop * block_size;
 
             from.seek(SeekFrom::Start(pos as u64)).unwrap();
-            let numread = from.read(&mut buffer1).unwrap();
-            if numread as i64 != block_size {
-                panic!("read {} bytes instead of {}", numread, block_size);
-            }
+            from.read_exact(&mut buffer1).unwrap();
 
             from.seek(SeekFrom::End(-pos - block_size)).unwrap();
-            let numread = from.read(&mut buffer2).unwrap();
-            if numread as i64 != block_size {
-                panic!("read {} bytes instead of {}", numread, block_size);
-            }
+            from.read_exact(&mut buffer2).unwrap();
 
             let mut off: usize = 32;
             for _ in 0 .. self.nonces {
@@ -136,16 +130,10 @@ impl<'a> Plot<'a> {
             }
 
             to.seek(SeekFrom::End(-pos - block_size)).unwrap();
-            let numwrite = to.write(&buffer2).unwrap();
-            if numwrite as i64 != block_size {
-                panic!("wrote {} bytes instead of {}", numread, block_size)
-            }
+            to.write_all(&buffer2).unwrap();
 
             to.seek(SeekFrom::Start(pos as u64)).unwrap();
-            let numwrite = to.write(&buffer1).unwrap();
-            if numwrite as i64 != block_size {
-                panic!("wrote {} bytes instead of {}", numread, block_size)
-            }
+            to.write_all(&buffer1).unwrap();
         }
 
         if !self.inline {
