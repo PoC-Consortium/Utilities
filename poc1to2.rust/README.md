@@ -1,5 +1,17 @@
 # PoC1 to PoC2 converter written in Rust
 
+## test && compile
+
+```shellsession
+cargo test
+```
+
+``` shellsession
+cargo build --release
+```
+
+Binary at target/release/poc1to2
+
 ## inline conversion
 
 ``` shellsession
