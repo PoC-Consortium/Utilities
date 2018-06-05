@@ -110,7 +110,7 @@ impl<'a> Plot<'a> {
             OpenOptions::new().write(true).open(p.as_path()).unwrap()
         };
 
-        if !quiet { println!("start processing sccops"); };
+        if !quiet { println!("start processing scoops"); };
         for scoop in 0i64 .. SCOOPS_IN_NONCE / 2 {
             let pos = scoop * block_size;
 
@@ -120,7 +120,10 @@ impl<'a> Plot<'a> {
             from.seek(SeekFrom::End(-pos - block_size)).unwrap();
             from.read_exact(&mut buffer2).unwrap();
 
-            if !quiet { print!("{}/{} ", scoop, SCOOPS_IN_NONCE - scoop); };
+            if !quiet {
+	       print!("{}/{} ", scoop, SCOOPS_IN_NONCE - scoop);
+	       std::io::stdout().flush().unwrap();
+	    };
 
             let mut off: usize = 32;
             for _ in 0 .. self.nonces {
