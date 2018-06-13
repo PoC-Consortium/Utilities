@@ -1,5 +1,5 @@
 
-## PoC2 to PoC1 conversion
+## PoC1 to PoC2 conversion
 
 This is not the intended mode of operation, but it works nevertheless.
 
