@@ -146,6 +146,7 @@ impl<'a> Plot<'a> {
             let out = PathBuf::from(self.out_dir).join(self.poc2_name());
             fs::rename(self.path, out).unwrap();
         };
+        if !quiet { println!("finished processing scoops"); };
     }
 
     fn poc2_name(&self) -> String {
