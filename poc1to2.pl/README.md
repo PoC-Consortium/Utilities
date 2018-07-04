@@ -1,6 +1,32 @@
-
 ## PoC1 to PoC2 conversion
 
+```
+ Usage:
+    ./poc1to2.pl [options] <plotfile>
+
+ Options:
+    --help
+      This help
+
+    --mem <megabyte>
+      Memory constraint to use less memory than the script would have used
+      without any constraints (1/2000th of plot size)
+      Given in megabyte, so -m 1000 will use roughly 1GB of memory
+
+    --out <directory>
+      Define a directory to write the converted plot file to. This switches
+      to copy on write mode. (Else in-place is default) and allows you to
+      fasten up the conversion at the expense of temporary additional HDD
+      space.
+
+    --quiet
+      Quiet operation. Really quiet - no output at all (except failures).
+      You can send the process into background and forget about it.
+```
+
+## PoC2 to PoC1 conversion
+
+By specifying a PoC2 plot file instead of a PoC1 plot file, you could revert it back to PoC1.
 This is not the intended mode of operation, but it works nevertheless.
 
 It's possible, because PoC1 -> PoC2 conversion does not lose any
