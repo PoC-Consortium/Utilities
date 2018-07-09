@@ -36,9 +36,13 @@ GetOptions(
     'help'  => \&print_help,            # keep generated test files
     'out=s' => \$outdir,
     'quiet' => \$quiet,
-) or croak "Formal error processing command line options!";
+) or &print_help;
 
-my $plotpath = $ARGV[0];
+my $plotpath = shift @ARGV || do {
+	say STDERR "No plot file specified";
+	&print_help;
+	exit 1;
+};
 
 if (!-r $plotpath) {
     fail("Given plotfile '$plotpath' unreadable or nonexistant.");
@@ -242,7 +246,7 @@ sub print_help {
     $0 - PoC1 to PoC2 converter
 
  Usage:
-    $0 [options]
+    $0 [options] <plotfile>
 
  Options:
     --help
